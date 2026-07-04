@@ -13,23 +13,6 @@ const LS_SKINS = [
 ];
 
 var lsAudioEl = window.__lsAudioEl || (window.__lsAudioEl = (function(){ var a = document.createElement('audio'); a.preload = 'auto'; a.setAttribute('playsinline',''); a.setAttribute('webkit-playsinline',''); a.style.display='none'; try{ (document.body||document.documentElement).appendChild(a); }catch(e){} return a; })());
-// ── 播放推进的「真相源」：索引/队列/模式放普通对象，切歌时同步读它，不依赖 React 提交（iOS 后台关键）──
-window.__lsAdv = window.__lsAdv || { list: null, idx: 0, kind: '', mode: 'loop', plan: [] };
-function lsSetAdv(list, idx, kind){ var A = window.__lsAdv; A.list = list || null; A.idx = idx || 0; A.kind = kind || ''; A.plan = []; }
-function lsPrefetchNext(){
-  var A = window.__lsAdv; if (!A || !A.list || !A.list.length || A.mode === 'one') return;
-  var n = A.list.length, ni;
-  if (A.kind === 'fm') ni = A.idx + 1;
-  else if (n < 2) return;
-  else if (A.mode === 'shuffle'){ while (A.plan.length < 3){ var r = Math.floor(Math.random()*n), g=0; while ((r===A.idx || A.plan.indexOf(r)>=0) && g++<12) r=Math.floor(Math.random()*n); A.plan.push(r); } ni = A.plan[0]; }
-  else ni = (A.idx + 1) % n;
-  var ns = A.list[ni]; if (!ns || !ns.id || ns.url) return;
-  var map = window.__lsPrefetchMap = window.__lsPrefetchMap || {};
-  if (map[String(ns.id)]) return;
-  map[String(ns.id)] = '';
-  var base = window.__LS_API || '/api';
-  fetch(base + '/ncm/song-url?id=' + ns.id).then(function(r){ return r.json(); }).then(function(d){ if (d && d.url) map[String(ns.id)] = d.url; else delete map[String(ns.id)]; }).catch(function(){ delete map[String(ns.id)]; });
-}
 var LS_DEMO_SRC = [];
 function LSApp() {
   const [skin, setSkin] = aUseState(() => { try { return localStorage.getItem('ls-skin') || 'ningzhi'; } catch (e) { return 'ningzhi'; } });
@@ -125,7 +108,7 @@ function LSApp() {
     setNcmLyric(''); setLoved(false);
 
     // 本地链接歌（用户在"本地"里自己添加的直链）：直接播，不走网易云
-    if (s && s.url) { markInternalAudioLoad(); lsAudioEl.src = s.url; playSoon(); logListen(s, s.url); lsPrefetchNext(); return; }
+    if (s && s.url) { markInternalAudioLoad(); lsAudioEl.src = s.url; playSoon(); logListen(s, s.url); return; }
     // 预取命中：上一首快放完时已把这首的 URL 取好，切歌零 fetch —— 后台（锁屏）续播不断
     const pf = window.__lsPrefetch;
     const pmapUrl = (window.__lsPrefetchMap || {})[String(s.id)] || '';
@@ -136,12 +119,10 @@ function LSApp() {
       logListen(s, hitUrl);
       window.__lsPrefetch = null;
       fetch(base + '/ncm/lyric?id=' + s.id).then(r => r.json()).then(l => { window.__lsTLyric = (l && l.tlyric) || ''; setNcmLyric((l && l.lyric) || ''); }).catch(function(){});
-      lsPrefetchNext();
       return;
     }
     fetch(base + '/ncm/song-url?id=' + s.id).then(r => r.json()).then(d => { if (d && d.url) { markInternalAudioLoad(); lsAudioEl.src = d.url; playSoon(); logListen(s, d.url); } else { logListen(s, ''); } }).catch(function(){ logListen(s, ''); });
     fetch(base + '/ncm/lyric?id=' + s.id).then(r => r.json()).then(l => { window.__lsTLyric = (l && l.tlyric) || ''; setNcmLyric((l && l.lyric) || ''); }).catch(function(){});
-    lsPrefetchNext();
   };
   const requestFmMore = (opts) => {
     opts = opts || {};
@@ -177,7 +158,7 @@ function LSApp() {
     if (ncmQueue.list.length - ncmQueue.idx <= 1) requestFmMore();
   }, [ncmQueue && ncmQueue.kind, ncmQueue && ncmQueue.idx, ncmQueue && ncmQueue.list && ncmQueue.list.length]);
 
-  // 开播即预取下一首的音频字节：iOS 锁屏后切新 src 时常不能重新联网，只预取 URL 不够。
+  // 开播即预取下一首的播放地址：不等尾窗（歌尾可能已在 iOS 后台、fetch 会被掐），前台就把地址备好，ended 零网络切歌
   aUseEffect(() => {
     if (!ncmQueue || !ncmQueue.list || !ncmQueue.list.length || playMode === 'one') return;
     const curSong = ncmQueue.list[ncmQueue.idx];
@@ -203,58 +184,29 @@ function LSApp() {
     const nxt = ncmQueue.list[ni];
     if (!nxt) return;
     const pmap = window.__lsPrefetchMap = window.__lsPrefetchMap || {};
-    const bmap = window.__lsPrefetchBlobMap = window.__lsPrefetchBlobMap || {};
+    window.__lsPrefetch = { id: nxt.id, url: nxt.url || pmap[String(nxt.id)] || null, idx: ni, forCur: String((curSong && curSong.id) || '') };
     const base = window.__LS_API || '/api';
-    const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-    const revokeBlob = (id) => { try { if (bmap[id] && bmap[id].url) URL.revokeObjectURL(bmap[id].url); } catch (e) {} delete bmap[id]; };
-    const setPrefetchedUrl = (sg, url) => {
-      const id = String(sg.id);
-      pmap[id] = url;
-      if (window.__lsPrefetch && String(window.__lsPrefetch.id) === id) window.__lsPrefetch.url = url;
-    };
-    const warmAudioBlob = (sg, directUrl) => {
-      const id = String(sg.id);
-      if (bmap[id] && bmap[id].url) { setPrefetchedUrl(sg, bmap[id].url); return; }
-      fetch(base + '/ncm/audio?id=' + encodeURIComponent(id)).then(function(r){
-        if (!r.ok) throw new Error('audio ' + r.status);
-        const len = Number(r.headers.get('content-length') || 0);
-        if (len && len > 80 * 1024 * 1024) throw new Error('audio too large');
-        return r.blob();
-      }).then(function(blob){
-        if (!blob || blob.size < 20000 || blob.size > 80 * 1024 * 1024) throw new Error('bad audio blob');
-        revokeBlob(id);
-        const url = URL.createObjectURL(blob);
-        bmap[id] = { url: url, src: directUrl || '', t: Date.now() };
-        setPrefetchedUrl(sg, url);
-      }).catch(function(){ if (directUrl) setPrefetchedUrl(sg, directUrl); else delete pmap[id]; });
-    };
-    window.__lsPrefetch = { id: nxt.id, url: nxt.url || pmap[String(nxt.id)] || (bmap[String(nxt.id)] && bmap[String(nxt.id)].url) || null, idx: ni, forCur: String((curSong && curSong.id) || '') };
     const grab = (sg) => {
-      if (!sg || !sg.id) return;
-      const id = String(sg.id);
-      if (sg.url) { setPrefetchedUrl(sg, sg.url); return; }
-      if (bmap[id] && bmap[id].url) { setPrefetchedUrl(sg, bmap[id].url); return; }
-      if (hasOwn(pmap, id)) { if (pmap[id] && !/^blob:/.test(String(pmap[id]))) warmAudioBlob(sg, pmap[id]); return; }
-      pmap[id] = '';
+      if (!sg || !sg.id || sg.url || pmap[String(sg.id)]) return;
+      pmap[String(sg.id)] = '';
       fetch(base + '/ncm/song-url?id=' + sg.id).then(r => r.json()).then(d2 => {
-        if (d2 && d2.url) { setPrefetchedUrl(sg, d2.url); warmAudioBlob(sg, d2.url); }
-        else delete pmap[id];
-      }).catch(function(){ delete pmap[id]; });
+        if (d2 && d2.url) { pmap[String(sg.id)] = d2.url; if (window.__lsPrefetch && String(window.__lsPrefetch.id) === String(sg.id)) window.__lsPrefetch.url = d2.url; }
+        else delete pmap[String(sg.id)];
+      }).catch(function(){ delete pmap[String(sg.id)]; });
     };
     grab(nxt);
     // 再往后多备两首，整段后台都有粮（随机按计划链，FM/顺序按队列）
     const keep = { [String(nxt.id)]: 1 };
-    if (curSong && curSong.id != null) keep[String(curSong.id)] = 1;
     if (playMode === 'shuffle' && !isFm) { (window.__lsShufflePlan || []).forEach(pi => { const sg = ncmQueue.list[pi]; if (sg) { grab(sg); keep[String(sg.id)] = 1; } }); }
     else { for (let k = 2; k <= 3; k++) { const j = isFm ? (ncmQueue.idx + k) : ((ncmQueue.idx + k) % ncmQueue.list.length); const sg = ncmQueue.list[j]; if (j < ncmQueue.list.length && sg) { grab(sg); keep[String(sg.id)] = 1; } } }
-    try { Object.keys(pmap).forEach(id => { if (!keep[id]) delete pmap[id]; }); Object.keys(bmap).forEach(id => { if (!keep[id]) revokeBlob(id); }); } catch (e) {}
+    try { Object.keys(pmap).forEach(id => { if (!keep[id]) delete pmap[id]; }); } catch (e) {}
   }, [cur, ncmQueue, playMode]);
   window.__lsPlayNcm = (song, list, i0) => {
     var lst = (list && list.length) ? list : [song];
     var i = (i0 != null) ? Number(i0) : ((list && list.length) ? lst.findIndex(function(x){ return String(x.id) === String(song.id); }) : 0);
     if (i < 0 || i >= lst.length) i = 0;
     window.__lsPrefetch = null; window.__lsShufflePlan = [];
-    saveLastplayNow(lst, i, '', 0); lsSetAdv(lst, i, '');
+    saveLastplayNow(lst, i, '', 0);
     setNcmQueue({ list: lst, idx: i });
     setNcmSong(lst[i]); setCur(0); setView('player'); setPlaying(true);
     loadNcm(lst[i]);
@@ -264,7 +216,7 @@ function LSApp() {
     if (!lst.length) return;
     var i = Math.max(0, Math.min(lst.length - 1, Number(i0) || 0));
     window.__lsPrefetch = null; window.__lsShufflePlan = [];
-    saveLastplayNow(lst, i, 'fm', 0); lsSetAdv(lst, i, 'fm');
+    saveLastplayNow(lst, i, 'fm', 0);
     setNcmQueue({ list: lst, idx: i, kind: 'fm' });
     if (playMode === 'one') setPlayMode('loop');
     setNcmSong(lst[i]); setCur(0); setView('player'); setPlaying(true); setFmOpen(false);
@@ -280,7 +232,7 @@ function LSApp() {
     } else {
       ni = ((i % q.list.length) + q.list.length) % q.list.length;
     }
-    saveLastplayNow(q.list, ni, q.kind, 0); lsSetAdv(q.list, ni, q.kind);
+    saveLastplayNow(q.list, ni, q.kind, 0);
     setNcmQueue({ ...q, idx: ni });
     setNcmSong(q.list[ni]); setCur(0); setPlaying(true);
     loadNcm(q.list[ni]);
@@ -362,7 +314,6 @@ function LSApp() {
                 var list = (q && q.list) ? q.list.slice() : [];
                 var i = list.findIndex(function (x) { return String(x.id) === String(s.id); });
                 if (i < 0) { list.push(s); i = list.length - 1; }
-                saveLastplayNow(list, i, '', 0);
                 setNcmSong(list[i]); setCur(0); setPlaying(true); loadNcm(list[i]);
                 return { list: list, idx: i };
               });
@@ -379,7 +330,7 @@ function LSApp() {
     var add = (songs && songs.length) ? songs : (songs ? [songs] : []);
     if (!add.length) return;
     window.__lsPrefetch = null; window.__lsShufflePlan = [];
-    setNcmQueue(q => { var list = q ? [...q.list, ...add] : add; var i = q ? q.idx : 0; saveLastplayNow(list, i, '', lsAudioEl.currentTime || 0); if (window.__lsAdv && window.__lsAdv.list) { window.__lsAdv.list = list; } return q ? { ...q, list: list, kind: '' } : { list: list, idx: 0, kind: '' }; });
+    setNcmQueue(q => { var list = q ? [...q.list, ...add] : add; saveLastplayNow(list, q ? q.idx : 0, q && q.kind, lsAudioEl.currentTime || 0); return q ? { ...q, list: list } : { list: list, idx: 0 }; });
   };
   // 队列弹窗用：替换真实队列，但不主动改播放进度/播放状态。
   window.__lsReplaceQueue = (songs, idx0) => {
@@ -387,7 +338,7 @@ function LSApp() {
     if (!lst.length) { saveLastplayNow([], 0, '', 0); setNcmQueue(null); return; }
     var i = Math.max(0, Math.min(lst.length - 1, idx0 || 0));
     window.__lsPrefetch = null; window.__lsShufflePlan = [];
-    saveLastplayNow(lst, i, '', lsAudioEl.currentTime || 0); lsSetAdv(lst, i, '');
+    saveLastplayNow(lst, i, '', lsAudioEl.currentTime || 0);
     setNcmQueue({ list: lst, idx: i });
     setNcmSong(lst[i]);
   };
@@ -400,31 +351,26 @@ function LSApp() {
     window.__lsNowPlaying = (cur && cur.title) ? { title: cur.title, artist: cur.artist || '', id: cur.id || '' } : null;
   }, [ncmSong, ncmQueue, idx]);
   aUseEffect(() => { if (playing) { try { const p = lsAudioEl.play(); if (p && p.catch) p.catch(function(){}); } catch(e){} } else lsAudioEl.pause(); }, [playing, idx, ncmSong, ncmQueue]);
-  window.__lsEv = { playMode: playMode, ncmQueue: ncmQueue, playNcmIdx: playNcmIdx, loadNcm: loadNcm, requestFmMore: requestFmMore };
-  window.__lsAdv.mode = playMode;
+  window.__lsEv = { playMode: playMode, ncmQueue: ncmQueue, playNcmIdx: playNcmIdx, loadNcm: loadNcm };
   window.__lsPlaying = playing;
   aUseEffect(() => {
     var onT = function(){ setCur(Math.floor(lsAudioEl.currentTime || 0)); };
     var onE = function(){
-      // 后台续播关键：完全从模块游标 __lsAdv 同步推进，绝不经 React 决策（后台 React 不提交）
-      var A = window.__lsAdv;
-      if (A && A.list && A.list.length) {
-        if (A.mode === 'one') { try { lsAudioEl.currentTime = 0; lsAudioEl.play().catch(function(){}); } catch(er){} return; }
-        var n = A.list.length, ni;
-        if (A.kind === 'fm') {
-          ni = A.idx + 1;
-          if (ni >= n) { try { (window.__lsEv && window.__lsEv.requestFmMore || function(){})({ playAfterAppend: true }); } catch(e){} return; }
-        } else if (A.mode === 'shuffle') { ni = (A.plan && A.plan.length) ? A.plan.shift() : Math.floor(Math.random()*n); }
-        else { ni = (A.idx + 1) % n; }
-        A.idx = ni;
-        var song = A.list[ni];
-        loadNcm(song); // 命中已预取的 __lsPrefetchMap → 同步 src+play；tail 再预取下一首
-        try { setNcmSong(song); setCur(0); setPlaying(true); setNcmQueue(function(q){ return q ? { ...q, idx: ni } : q; }); } catch(e){}
-        return;
-      }
       var e = window.__lsEv || {};
-      if (!LS_SONGS.length) { setPlaying(false); setCur(0); return; }
-      setIdx(function(i){ return (e.playMode) === 'shuffle' ? Math.floor(Math.random()*LS_SONGS.length) : (i+1)%LS_SONGS.length; }); setCur(0);
+      if (e.ncmQueue) {
+        // 单曲循环：原地回到 0 重播，不重新请求 URL —— 后台（iOS 锁屏）时 fetch 会被挂起导致停播
+        if (e.playMode === 'one') { try { lsAudioEl.currentTime = 0; lsAudioEl.play().catch(function(){}); } catch(er){} }
+        else if (e.playNcmIdx) {
+          var isFm = e.ncmQueue.kind === 'fm';
+          var pfe = window.__lsPrefetch;
+          var planI = (!isFm && e.playMode === 'shuffle' && window.__lsShufflePlan && window.__lsShufflePlan.length) ? window.__lsShufflePlan.shift() : null;
+          var nextI = isFm ? e.ncmQueue.idx + 1 : (planI != null ? planI : ((pfe && pfe.idx != null) ? pfe.idx : (e.playMode === 'shuffle' ? Math.floor(Math.random()*e.ncmQueue.list.length) : e.ncmQueue.idx + 1)));
+          e.playNcmIdx(nextI);
+        }
+      } else {
+        if (!LS_SONGS.length) { setPlaying(false); setCur(0); return; }
+        setIdx(function(i){ return (e.playMode) === 'shuffle' ? Math.floor(Math.random()*LS_SONGS.length) : (i+1)%LS_SONGS.length; }); setCur(0);
+      }
     };
     var onP = function(){
       // 换源/自然 ended 会短暂 pause；这不是用户或系统暂停，不能把 React 播放态打断。
