@@ -660,6 +660,7 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
   const [, forceTick] = vUseState(0);
   const chatRef = vUseRef(null);
   const sysRef = vUseRef({ init: false, title: '', playing: null, mode: '' });
+  const analyzedRef = vUseRef({});
 
   const audio = window.__lsAudioEl;
   const isPlaying = (playing != null) ? playing : (audio ? !audio.paused : true);
@@ -878,6 +879,18 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
     }
     s.title = title; s.playing = isPlaying; s.mode = pm;
     if (msgs.length) { const sysMsgs = msgs.map(t => ({ who: 'sys', t: t, time: lsNow(), sys: true })); setChat(c => [...c, ...sysMsgs]); sysMsgs.forEach(bcast); }
+    // 切到新歌：分析模型（设置里的 gemini）听一遍发感想进聊天。服务端按歌缓存，一首只分析一次
+    if (title && msgs.some(t => t.indexOf('播放了') >= 0) && song && song.id && /^\d+$/.test(String(song.id)) && !analyzedRef.current[song.id]) {
+      analyzedRef.current[song.id] = 1;
+      const aCfg = (window.__lsStore && window.__lsStore.model && window.__lsStore.model.analysis) || {};
+      const ai = {};
+      if (aCfg.endpoint && aCfg.key) { ai.base_url = aCfg.endpoint; ai.api_key = aCfg.key; if (aCfg.name) ai.model = aCfg.name; }
+      const lyricLines = (ncmLyric ? lsParseLRC(ncmLyric) : []).map(x => x.line).slice(0, 40);
+      fetch((window.__LS_API || '/api') + '/song-analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: song.id, title: title, artist: npArtist, lyrics: lyricLines, ai: ai }) })
+        .then(r => r.json())
+        .then(d => { if (d && d.ok && d.text) { const am = { who: 'yu', t: d.text, time: lsNow() }; setChat(c => [...c, am]); bcast(am); } })
+        .catch(() => {});
+    }
   }, [song && song.title, isPlaying, playMode]);
 
   // 新消息滚到底
