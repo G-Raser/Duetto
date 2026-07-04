@@ -51,6 +51,9 @@ function LSPlayerView({ idx, setIdx, playing, setPlaying, cur, setCur, loved, se
   }, [song && song.id]);
   const [toast, setToast] = vUseState('');
   const flash = (t) => { setToast(t); setTimeout(() => setToast(''), 1800); };
+  const lyLp = vUseRef({ t: 0, fired: false });
+  const lyLpStart = (line) => () => { lyLp.current.fired = false; clearTimeout(lyLp.current.t); if (!line || /^[^:：]{1,12}[:：]/.test(line.trim())) return; lyLp.current.t = setTimeout(() => { lyLp.current.fired = true; try { navigator.vibrate && navigator.vibrate(12); } catch (e) {} window.__lsPendingQuote = { line: line, song: song.title || '' }; flash('已引用 · 去房间发给 TA'); }, 550); };
+  const lyLpEnd = () => { clearTimeout(lyLp.current.t); };
 
   // 歌手主页：点歌手名 → 搜歌手 → 热门歌曲抽屉（点歌即播）
   const [artistSheet, setArtistSheet] = vUseState(null);
@@ -330,7 +333,9 @@ function LSPlayerView({ idx, setIdx, playing, setPlaying, cur, setCur, loved, se
             </div>
             <div className={'ls-lyric-full lf-' + lyFont + ' lz-' + lySize} ref={lyBox} onScroll={onLyScroll}>
               {lyrics.map((l, i) => (
-                <div key={i} ref={i === li ? lyOn : null} className={'ls-lyric-line' + (i === li ? ' on' : '')}>
+                <div key={i} ref={i === li ? lyOn : null} className={'ls-lyric-line' + (i === li ? ' on' : '')}
+                  onClick={() => { if (lyLp.current.fired) { lyLp.current.fired = false; return; } if (onPickLyric && l.line && !/^[^:：]{1,12}[:：]/.test(l.line.trim())) onPickLyric(l.line); }}
+                  onPointerDown={lyLpStart(l.line)} onPointerUp={lyLpEnd} onPointerLeave={lyLpEnd} onPointerMove={lyLpEnd}>
                   {l.line}
                   {transOn && trMap && trMap[l.t] ? <div className="lyr-tr">{trMap[l.t]}</div> : null}
                 </div>
@@ -682,6 +687,7 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
   const toggleBg = () => setBgOn(v => { const nv = !v; try { localStorage.setItem('ls-room-bg-on', nv ? '1' : '0'); } catch (e) {} return nv; });
   const toggleAvas = () => setHideAvas(function (h) { const nh = !h; try { localStorage.setItem('ls-room-hideava', nh ? '1' : '0'); } catch (e) {} return nh; });
   const [lyrQuote, setLyrQuote] = vUseState('');
+  vUseEffect(function () { try { var pq = window.__lsPendingQuote; if (pq && pq.line) { setLyrQuote(pq.line); window.__lsPendingQuote = null; } } catch (e) {} }, []);
   const [replyMode, setReplyMode] = vUseState(function () { try { return localStorage.getItem('ls-room-replymode') || 'bubbles'; } catch (e) { return 'bubbles'; } });
   const setRM = function (v) { setReplyMode(v); try { localStorage.setItem('ls-room-replymode', v); } catch (e) {} };
   const [timeAware, setTimeAware] = vUseState(function () { try { return localStorage.getItem('ls-room-timeaware') !== '0'; } catch (e) { return true; } });
@@ -844,7 +850,7 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
       ".lsr-row{display:flex;align-items:flex-start;gap:10px;margin:7px 0}",
       ".lsr-row.self{justify-content:flex-end}",
       ".lsr-row.other{justify-content:flex-start}",
-      ".lsr-ava{width:42px;height:42px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--ls-panel2)}",
+      ".lsr-ava{width:42px;height:42px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--ls-panel2);border:1px solid color-mix(in srgb, #fff 72%, var(--ls-bg))}",
       ".lsr-ava .ls-w-face,.lsr-ava image-slot{width:100%;height:100%;display:block}",
       ".lsr-ava.ghost{visibility:hidden}",
       ".lsr-col{display:flex;flex-direction:column;gap:4px;min-width:0;max-width:min(76%,300px);position:relative}",
@@ -852,12 +858,14 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
       ".lsr-row.self .lsr-col{align-items:flex-end}",
       ".lsr-row.other .lsr-col{align-items:flex-start}",
       ".lsr-bubble{max-width:100%;border-radius:20px;padding:7px 11px 8px;line-height:1.7;font-size:13px;font-family:var(--ls-cn);white-space:pre-wrap;overflow-wrap:anywhere}",
-      ".lsr-row.self .lsr-bubble{background:var(--lsr-bub-self,color-mix(in srgb, var(--ls-panel) 15%, #fff));color:var(--ls-ink);border:1px solid transparent;border-bottom-right-radius:6px;backdrop-filter:blur(var(--lsr-blur-self,0px));-webkit-backdrop-filter:blur(var(--lsr-blur-self,0px))}",
-      ".lsr-row.other .lsr-bubble{background:var(--lsr-bub-other,color-mix(in srgb, var(--ls-bg) 15%, #fff));color:var(--ls-ink);border:1px solid transparent;border-bottom-left-radius:6px;backdrop-filter:blur(var(--lsr-blur-other,10px));-webkit-backdrop-filter:blur(var(--lsr-blur-other,10px))}",
+      ".lsr-row.self .lsr-bubble{background:var(--lsr-bub-self,color-mix(in srgb, var(--ls-panel) 15%, #fff));color:var(--ls-ink);border:1px solid color-mix(in srgb, #fff 72%, var(--ls-bg));border-bottom-right-radius:6px;backdrop-filter:blur(var(--lsr-blur-self,0px));-webkit-backdrop-filter:blur(var(--lsr-blur-self,0px))}",
+      ".lsr-row.other .lsr-bubble{background:var(--lsr-bub-other,color-mix(in srgb, var(--ls-bg) 15%, #fff));color:var(--ls-ink);border:1px solid color-mix(in srgb, #fff 72%, var(--ls-bg));border-bottom-left-radius:6px;backdrop-filter:blur(var(--lsr-blur-other,10px));-webkit-backdrop-filter:blur(var(--lsr-blur-other,10px))}",
       ".lsr-time{font-family:var(--ls-meta);font-size:9px;color:var(--ls-ink-faint);position:absolute;bottom:2px;white-space:nowrap}",
       ".lsr-row.other .lsr-time{left:100%;margin-left:5px}",
       ".lsr-row.self .lsr-time{right:100%;margin-right:5px}",
       ".lsr-row.runfirst{margin-top:7px}",
+      ".lsr-bq{margin:0 0 6px;padding:6px 10px;border-radius:10px;background:color-mix(in srgb,var(--ls-ink) 8%,transparent);font-size:12px;line-height:1.55;color:var(--ls-ink-dim);white-space:pre-wrap}",
+      ".lsr-bq .bq-src{display:block;font-size:9.5px;opacity:.72;margin-bottom:2px;font-family:var(--ls-meta)}",
       ".lsr-quotebar{display:flex;align-items:center;gap:8px;margin:0 14px 4px;padding:7px 12px;border-radius:12px;background:color-mix(in srgb,var(--ls-panel) 55%,transparent);border:1px solid var(--ls-line-soft);font-family:var(--ls-cn);font-size:12px;color:var(--ls-ink-dim)}",
       ".lsr-quotebar span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".lsr-quotebar button{border:none;background:none;color:var(--ls-ink-faint);font-size:16px;cursor:pointer;padding:0 2px}",
@@ -931,8 +939,7 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
     if (!text || busy) return;
     const qv = lyrQuote; setLyrQuote('');
     setDraft('');
-    const shownText = qv ? ('「' + qv + '」\n' + text) : text;
-    const userMsg = { who: 'eve', t: shownText, time: lsNow() };
+    const userMsg = { who: 'eve', t: text, quote: qv || undefined, qsong: qv ? (song.title || '') : undefined, time: lsNow() };
     setChat(c => [...c, userMsg]);
     bcast(userMsg);
     // 仅「点歌聊」走 AI DJ；其余标签保持原样
@@ -1086,7 +1093,7 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
               {!self && !hideAvas && (firstOfRun ? <div className="lsr-ava"><LSFace who="yu" /></div> : <div className="lsr-ava ghost"></div>)}
               <div className="lsr-col">
                 {m.think ? <details className="lsr-think"><summary>💭 思考过程</summary><div className="tk">{m.think}</div></details> : null}
-                {m.t ? <div className="lsr-bubble">{m.t}</div> : null}
+                {(m.t || m.quote) ? <div className="lsr-bubble">{m.quote ? <div className="lsr-bq"><span className="bq-src">♪ {m.qsong || '歌词'}</span>{m.quote}</div> : null}{m.t}</div> : null}
                 {m.share && (<div className="lsr-share" onClick={() => playSharedNcm(m.share)}><div className="cv"><LSCover cover={m.share.cover} shape="rounded" radius={10} size={120} /></div><div className="mn"><div className="eb">{(self ? eveName : yuName) + ' · 分享'}</div><b>{m.share.title}</b><span>{m.share.artist}</span></div><button className="pl" onClick={(e) => { e.stopPropagation(); playSharedNcm(m.share); }}>{String(song.id) === String(m.share.id) && isPlaying ? <span className="eq2"><i></i><i></i><i></i></span> : LSIcon.play()}</button></div>)}
                 {s && (<div className="lsr-share" onClick={() => playShared(s)}><div className="cv"><LSCover cover={s.cover} shape="rounded" radius={10} size={120} /></div><div className="mn"><div className="eb">{self ? 'You · 分享' : 'AI · 分享'}</div><b>{s.title}</b><span>{s.artist}</span></div><button className="pl" onClick={(e) => { e.stopPropagation(); playShared(s); }}>{LSIcon.play()}</button></div>)}
                 {m.time ? <div className="lsr-time">{m.time}</div> : null}

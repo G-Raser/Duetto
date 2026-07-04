@@ -87,8 +87,8 @@ function LSAskBar({ song, passage, onClear, onSaved }) {
     try {
       if (window.__LS_SYNC && window.__LS_SYNC.send) {
         const d0 = new Date(); const tm = (d0.getHours() < 10 ? '0' : '') + d0.getHours() + ':' + (d0.getMinutes() < 10 ? '0' : '') + d0.getMinutes();
-        const qTxt = ((passage ? ('「' + passage + '」') : '') + ' ' + (think.trim() || (chip ? chip.label : ''))).trim();
-        if (qTxt) window.__LS_SYNC.send({ t: 'chat', msg: { who: 'eve', t: qTxt, time: tm } });
+        const qBody = (think.trim() || (chip ? chip.prompt : '')).trim();
+        if (qBody || passage) window.__LS_SYNC.send({ t: 'chat', msg: { who: 'eve', t: qBody, quote: passage || undefined, qsong: (song && song.title) || undefined, time: tm } });
         if (out) String(out).split(/\n+/).map(function(x){ return x.trim(); }).filter(Boolean).forEach(function(seg){ window.__LS_SYNC.send({ t: 'chat', msg: { who: 'yu', t: seg, time: tm } }); });
       }
     } catch (e) {}
