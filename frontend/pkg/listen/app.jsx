@@ -148,7 +148,14 @@ function LSApp() {
     let ni = ncmQueue.idx + 1;
     if (!isFm) {
       ni = ni % ncmQueue.list.length;
-      if (playMode === 'shuffle') { ni = Math.floor(Math.random() * ncmQueue.list.length); if (ni === ncmQueue.idx && ncmQueue.list.length > 1) ni = (ni + 1) % ncmQueue.list.length; }
+      if (playMode === 'shuffle') {
+        // 计划链：提前抽好接下来 3 首的随机顺序，ended 依次消费——后台连切也有粮
+        const len = ncmQueue.list.length;
+        let plan = (window.__lsShufflePlan || []).filter(x => x >= 0 && x < len);
+        while (plan.length < 3) { let r = Math.floor(Math.random() * len); const avoid = [ncmQueue.idx].concat(plan); if (len > avoid.length) { let g = 0; while (avoid.indexOf(r) >= 0 && g++ < 12) r = Math.floor(Math.random() * len); } plan.push(r); }
+        window.__lsShufflePlan = plan;
+        ni = plan[0];
+      } else if (window.__lsShufflePlan && window.__lsShufflePlan.length) window.__lsShufflePlan = [];
     }
     if (ni >= ncmQueue.list.length) return;
     const nxt = ncmQueue.list[ni];
@@ -165,8 +172,9 @@ function LSApp() {
       }).catch(function(){ delete pmap[String(sg.id)]; });
     };
     grab(nxt);
-    // 顺序/列表循环时再往后多备两首，整段后台都有粮
-    if (playMode !== 'shuffle') { for (let k = 2; k <= 3; k++) grab(ncmQueue.list[(ncmQueue.idx + k) % ncmQueue.list.length]); }
+    // 再往后多备两首，整段后台都有粮（随机按计划链，FM/顺序按队列）
+    if (playMode === 'shuffle' && !isFm) { (window.__lsShufflePlan || []).forEach(pi => grab(ncmQueue.list[pi])); }
+    else { for (let k = 2; k <= 3; k++) { const j = isFm ? (ncmQueue.idx + k) : ((ncmQueue.idx + k) % ncmQueue.list.length); if (j < ncmQueue.list.length) grab(ncmQueue.list[j]); } }
   }, [cur, ncmQueue, playMode]);
   window.__lsPlayNcm = (song, list, i0) => {
     var lst = (list && list.length) ? list : [song];
@@ -323,7 +331,8 @@ function LSApp() {
         else if (e.playNcmIdx) {
           var isFm = e.ncmQueue.kind === 'fm';
           var pfe = window.__lsPrefetch;
-          var nextI = isFm ? e.ncmQueue.idx + 1 : ((pfe && pfe.idx != null) ? pfe.idx : (e.playMode === 'shuffle' ? Math.floor(Math.random()*e.ncmQueue.list.length) : e.ncmQueue.idx + 1));
+          var planI = (!isFm && e.playMode === 'shuffle' && window.__lsShufflePlan && window.__lsShufflePlan.length) ? window.__lsShufflePlan.shift() : null;
+          var nextI = isFm ? e.ncmQueue.idx + 1 : (planI != null ? planI : ((pfe && pfe.idx != null) ? pfe.idx : (e.playMode === 'shuffle' ? Math.floor(Math.random()*e.ncmQueue.list.length) : e.ncmQueue.idx + 1)));
           e.playNcmIdx(nextI);
         }
       } else {
