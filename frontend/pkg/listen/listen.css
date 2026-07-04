@@ -1360,6 +1360,15 @@ input, textarea { font: inherit; color: inherit; }
 .ls-rset.spk .spk-sub{font-family:var(--ls-cn);font-size:11px;color:var(--ls-ink-faint);margin:10px 2px 0}
 .ls-rset.spk .spk-row .spk-play{width:30px;height:30px;border-radius:50%;border:none;background:color-mix(in srgb,var(--ls-gold,#b79268) 14%,transparent);color:var(--ls-gold,#b79268);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0}
 .ls-rset.spk .spk-row .spk-play svg{fill:currentColor}
+/* 听歌档案：常听排行 */
+.ls-dossier{margin:2px 0 8px}
+.ls-doss-h{font-family:var(--ls-cn);font-size:12px;color:var(--ls-ink-faint);margin:8px 2px 6px}
+.ls-doss-row{display:flex;align-items:flex-start;gap:10px;padding:9px 4px;border-radius:12px}
+.ls-doss-row .no{font-family:var(--ls-meta);font-size:10px;color:var(--ls-ink-faint);width:20px;flex-shrink:0;padding-top:3px}
+.ls-doss-row .si{flex:1;min-width:0}
+.ls-doss-row .si b{display:block;font-family:var(--ls-cn);font-size:13.5px;font-weight:600;color:var(--ls-ink)}
+.ls-doss-row .si i{display:block;font-style:normal;font-family:var(--ls-cn);font-size:11px;color:var(--ls-ink-dim);margin-top:2px}
+.ls-doss-row .si .vibe{margin-top:5px;padding:7px 10px;border-radius:10px;background:color-mix(in srgb,var(--ls-panel) 40%,transparent);border:1px solid var(--ls-line-soft);font-family:var(--ls-cn);font-size:11.5px;line-height:1.65;color:var(--ls-ink-dim)}
 /* 分享卡：正在放这首时播放键变跳动条 */
 .lsr-share .pl .eq2{display:flex;align-items:flex-end;gap:2px;height:12px}
 .lsr-share .pl .eq2 i{width:2.5px;border-radius:2px;background:currentColor;animation:lsEq2 .9s ease-in-out infinite}

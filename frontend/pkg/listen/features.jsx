@@ -163,15 +163,39 @@ function LSSongDrawer({ song: songProp, ncmSong, ncmId, loved, onToggleLove, inL
 function LSArchiveView({ onOpenSong }) {
   const list = window.__lsStore.archive || [];
   const f = list;
+  // 真实听歌档案：服务端聚合（总量 / 时段偏好 / 常听排行 + 每首的听后印象）
+  const [stats, setStats] = fUseState(null);
+  fUseEffect(function () {
+    fetch((window.__LS_API || '/api') + '/listen-stats').then(function (r) { return r.json(); }).then(function (d) { if (d && d.ok) setStats(d); }).catch(function () {});
+  }, []);
+  const fmtDay = function (ts) { try { const d = new Date(ts); return (d.getMonth() + 1) + '月' + d.getDate() + '日'; } catch (e) { return ''; } };
+  const topBucket = (stats && stats.buckets) ? Object.entries(stats.buckets).sort(function (a, b) { return b[1] - a[1]; })[0] : null;
   return (
     <div className="ls-body">
       <div className="ls-arc-head">
         <div className="ls-arc-h">听歌档案</div>
-        <div className="ls-arc-sub">在场记录 · 最近 {list.length} 条</div>
+        <div className="ls-arc-sub">{stats && stats.total ? ('一起听过 ' + stats.total + ' 次 · ' + stats.distinct + ' 首歌' + (topBucket ? (' · 最常在' + topBucket[0] + '听') : '')) : ('在场记录 · 最近 ' + list.length + ' 条')}</div>
       </div>
+      {stats && stats.top && stats.top.length ? (
+        <div className="ls-dossier">
+          <div className="ls-doss-h">我们最常听</div>
+          {stats.top.slice(0, 12).map(function (t, i) {
+            return (
+              <div className="ls-doss-row" key={(t.id || t.title) + '_' + i}>
+                <span className="no">{String(i + 1).padStart(2, '0')}</span>
+                <div className="si">
+                  <b>{t.title}</b>
+                  <i>{t.artist}{t.plays > 1 ? (' · 听了 ' + t.plays + ' 次') : ''}{t.last ? (' · 最近 ' + fmtDay(t.last)) : ''}</i>
+                  {t.vibe ? <div className="vibe">{t.vibe}</div> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {f.length
-        ? <div className="ls-arc-list">{f.map(a => <LSArcCard key={a.id} rec={a} onOpen={onOpenSong} />)}</div>
-        : <LSEmpty t="这个筛选下还没有记录" s="换个筛选，或去歌词页问问 Ta" />}
+        ? <div className="ls-arc-list">{stats && stats.top && stats.top.length ? <div className="ls-doss-h" style={{ marginTop: 14 }}>问 Ta 的记录</div> : null}{f.map(a => <LSArcCard key={a.id} rec={a} onOpen={onOpenSong} />)}</div>
+        : (stats && stats.top && stats.top.length ? null : <LSEmpty t="还没有记录" s="放几首歌、或去歌词页问问 Ta" />)}
     </div>
   );
 }

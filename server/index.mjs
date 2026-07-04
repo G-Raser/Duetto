@@ -117,6 +117,27 @@ const listenFile = path.join(dataDir, 'listen-log.jsonl');
 app.post('/api/listen-log',(q,r)=>{ try{ const b=q.body||{}; if(!b.title&&!b.id) return r.json({ok:false}); const now=Date.now(); let h=12; try{ h=Number(new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,hour:'2-digit'})); }catch(e){} fs.mkdirSync(dataDir,{recursive:true}); fs.appendFileSync(listenFile, JSON.stringify({ id:String(b.id||''), title:String(b.title||''), artist:String(b.artist||''), dur:Number(b.dur)||0, bucket:timeBucket(h), ts:now })+'\n'); r.json({ok:true}); }catch(e){ r.status(500).json({ok:false,error:e.message}); } });
 app.get('/api/listen-log',(q,r)=>{ try{ const limit=Math.min(500, Number(q.query.limit)||100); let lines=[]; try{ lines=fs.readFileSync(listenFile,'utf8').trim().split('\n'); }catch(e){} const out=[]; for(let i=lines.length-1;i>=0&&out.length<limit;i--){ try{ out.push(JSON.parse(lines[i])); }catch(err){} } r.json({ok:true,plays:out}); }catch(e){ r.status(500).json({ok:false,error:e.message}); } });
 
+// —— 听歌档案：每首歌的聚合（次数/首末时间/听后印象）+ 总览（总量/时段分布/常听排行） ——
+app.get('/api/listen-stats',(q,r)=>{
+  try {
+    let lines = []; try { lines = fs.readFileSync(listenFile,'utf8').trim().split('\n'); } catch(e){}
+    const songs = {}, buckets = {}; let total = 0;
+    for (const ln of lines) {
+      let e; try { e = JSON.parse(ln); } catch(err) { continue; }
+      if (!e || !e.title) continue; total++;
+      const k = String(e.id || e.title);
+      if (!songs[k]) songs[k] = { id: String(e.id || ''), title: e.title, artist: e.artist || '', plays: 0, first: e.ts, last: e.ts };
+      const g = songs[k]; g.plays++; if (e.ts < g.first) g.first = e.ts; if (e.ts > g.last) g.last = e.ts;
+      if (e.bucket) buckets[e.bucket] = (buckets[e.bucket] || 0) + 1;
+    }
+    const arr = Object.values(songs);
+    const top = arr.slice().sort((a,b)=>b.plays-a.plays).slice(0, 30);
+    for (const t of top) { if (t.id) { const a = readAnalysis(t.id); if (a) t.vibe = a.text; } }
+    const recent = arr.slice().sort((a,b)=>b.last-a.last).slice(0, 30);
+    r.json({ ok: true, total, distinct: arr.length, buckets, top, recent });
+  } catch(e) { r.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.use(express.static(path.join(rootDir,'frontend')));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
