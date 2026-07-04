@@ -58,4 +58,5 @@
     return fetchComplete(prompt, ai, np, history);
   }
   window.claude={ complete: complete, ask: complete };
+  window.__lsAiConfig=aiConfig;
 })();

@@ -678,6 +678,16 @@ function LSChatView({ tab, setTab, idx, setIdx, playing, setPlaying, ncmSong, nc
   const pickTop = (k) => { setTopStyle(k); try { localStorage.setItem('ls-room-top', k); } catch (e) {} };
   const toggleBg = () => setBgOn(v => { const nv = !v; try { localStorage.setItem('ls-room-bg-on', nv ? '1' : '0'); } catch (e) {} return nv; });
   const toggleAvas = () => setHideAvas(function (h) { const nh = !h; try { localStorage.setItem('ls-room-hideava', nh ? '1' : '0'); } catch (e) {} return nh; });
+  // 宫殿语义：进房间/房间里切歌，就对这首歌预热分析（真听一次永久缓存）——开口聊时听感已就位
+  vUseEffect(function () {
+    try {
+      if (!song || !song.id || !/^\d+$/.test(String(song.id))) return;
+      var au = window.__lsAudioEl;
+      var u = (au && /^https?:/.test(String(au.src || ''))) ? au.src : '';
+      var ai = (window.__lsAiConfig && window.__lsAiConfig()) || {};
+      fetch((window.__LS_API || '/api') + '/analysis-warm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: song.id, title: song.title || '', artist: song.artist || '', url: u, ai: ai }) }).catch(function () {});
+    } catch (e) {}
+  }, [song && song.id]);
   const [timeAware, setTimeAware] = vUseState(function () { try { return localStorage.getItem('ls-room-timeaware') !== '0'; } catch (e) { return true; } });
   const toggleTimeAware = () => setTimeAware(function (v) { const nv = !v; try { localStorage.setItem('ls-room-timeaware', nv ? '1' : '0'); } catch (e) {} return nv; });
   // 房间背景层在弹层最底（app.jsx 渲染，铺到顶栏后面），这里只负责显隐
