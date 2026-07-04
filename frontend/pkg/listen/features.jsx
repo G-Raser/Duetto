@@ -69,6 +69,8 @@ function LSSongDrawer({ song: songProp, ncmSong, ncmId, loved, onToggleLove, inL
   const [qToast, setQToast] = fUseState('');
   const startY = fUseRef(null);
   const [ncmC, setNcmC] = fUseState(null);
+  const [ana, setAna] = fUseState('');
+  fUseEffect(() => { let on = true; setAna(''); if (song && song.id && /^\d+$/.test(String(song.id))) { fetch((window.__LS_API || '/api') + '/song-analysis?id=' + song.id).then(r => r.json()).then(d => { if (on && d && d.ok) setAna(d.text || ''); }).catch(() => {}); } return () => { on = false; }; }, [song && song.id]);
   const localArc = (window.__lsStore.archive || []).filter(a => a.songId === song.id);
   const [srvArc, setSrvArc] = fUseState(null);
   fUseEffect(() => { let on = true; if (song && song.id && /^\d+$/.test(String(song.id))) { fetch((window.__LS_API || '/api') + '/song-notes?id=' + song.id).then(r => r.json()).then(d => { if (on && d && d.ok) setSrvArc(lsNotesToRecs(d.notes)); }).catch(() => {}); } return () => { on = false; }; }, [song && song.id]);
@@ -126,8 +128,11 @@ function LSSongDrawer({ song: songProp, ncmSong, ncmId, loved, onToggleLove, inL
             ? <div className="ls-arc-list">{archive.map(a => <LSArcCard key={a.id} rec={a} compact />)}</div>
             : <LSEmpty t="还没有在场记录" s="点「问 Ta」或在歌词页引用一句，开始第一条" />)}
 
-          {tab === 'lyric' && ((song.lyrics && song.lyrics.length)
-            ? <div className="ls-dr-lyrics">
+          {tab === 'lyric' && (<div>
+            {ana
+              ? <div className="ls-dr-ana">{ana}</div>
+              : <LSEmpty t="还没认真听过这首" s="放着它进房间聊聊、或点「问 Ta」，就会真的听一遍写下来" />}
+            {(song.lyrics && song.lyrics.length) ? <div className="ls-dr-lyrics">
               {song.lyrics.map((l, i) => {
                 const t = l.line.replace(/[（(].*?[)）]/g, '').trim();
                 const askable = t && !/^[·\s]+$/.test(t);
@@ -135,8 +140,8 @@ function LSSongDrawer({ song: songProp, ncmSong, ncmId, loved, onToggleLove, inL
                   onClick={() => askable && onAskAI(song, t)}>{l.line}</div>;
               })}
               <div className="ls-empty" style={{ padding: '16px 0 0' }}><div className="e-s">点任意一句 → 引用给 AI</div></div>
-            </div>
-            : <LSEmpty t="暂无歌词" s="播放这首歌后可在播放页看歌词" />)}
+            </div> : null}
+          </div>)}
 
           {tab === 'ncm' && (
             <div className="ls-dr-ncm">
@@ -189,26 +194,9 @@ function LSArchiveView({ onOpenSong }) {
         <div className="ls-arc-h">听歌档案</div>
         <div className="ls-arc-sub">{stats && stats.total ? ('一起听过 ' + stats.total + ' 次 · ' + stats.distinct + ' 首歌' + (topBucket ? (' · 最常在' + topBucket[0] + '听') : '')) : ('在场记录 · 最近 ' + list.length + ' 条')}</div>
       </div>
-      {stats && stats.top && stats.top.length ? (
-        <div className="ls-dossier">
-          <div className="ls-doss-h">我们最常听</div>
-          {stats.top.slice(0, 12).map(function (t, i) {
-            return (
-              <div className="ls-doss-row" key={(t.id || t.title) + '_' + i}>
-                <span className="no">{String(i + 1).padStart(2, '0')}</span>
-                <div className="si">
-                  <b>{t.title}</b>
-                  <i>{t.artist}{t.plays > 1 ? (' · 听了 ' + t.plays + ' 次') : ''}{t.last ? (' · 最近 ' + fmtDay(t.last)) : ''}</i>
-                  {t.vibe ? <div className="vibe">{t.vibe}</div> : null}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
       {f.length
-        ? <div className="ls-arc-list">{stats && stats.top && stats.top.length ? <div className="ls-doss-h" style={{ marginTop: 14 }}>问 Ta 的记录</div> : null}{f.map(a => <LSArcCard key={a.id} rec={a} onOpen={onOpenSong} />)}</div>
-        : (stats && stats.top && stats.top.length ? null : <LSEmpty t="还没有记录" s="放几首歌、或去歌词页问问 Ta" />)}
+        ? <div className="ls-arc-list">{f.map(a => <LSArcCard key={a.id} rec={a} onOpen={onOpenSong} />)}</div>
+        : <LSEmpty t="还没有记录" s="放几首歌、或去歌词页问问 Ta" />}
     </div>
   );
 }

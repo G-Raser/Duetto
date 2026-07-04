@@ -48,6 +48,7 @@
     var history=historyOf(opts);
     // WS 通道只转发 prompt+ai：把上下文一并挂进 ai，后端 WS 处理器会读取
     if(opts&&opts.noNote)ai.no_note=1;
+    if(opts&&opts.quote)ai.quote=String(opts.quote);
     if(window.__LS_SYNC&&window.__LS_SYNC.aiSend){
       var wsAi={};
       for(var k in ai)wsAi[k]=ai[k];

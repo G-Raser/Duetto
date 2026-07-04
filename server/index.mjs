@@ -102,24 +102,32 @@ function logRoomNote(s, np, prompt, reply){
     const q2 = String(prompt||'').trim(), a2 = String(reply||'').trim();
     if (!q2 || !a2 || a2.startsWith('[AI ')) return;
     const sid = String(np.id), now = Date.now();
-    db.prepare('INSERT INTO song_notes(song_id,title,artist,passage,thought,reply,ts) VALUES(?,?,?,?,?,?,?)').run(sid, np.title||'', np.artist||'', String(np.cur_lyric||'').slice(0,80), q2.slice(0,500), a2.slice(0,1000), now);
+    let pass = String(np.quote || np.cur_lyric || '').slice(0, 120);
+    let th2 = q2;
+    if (np.quote) { const _ls = th2.split('\n'); if (_ls[0] && _ls[0].indexOf(np.quote) >= 0) th2 = _ls.slice(1).join('\n').trim() || th2; }
+    if (!np.quote && /^[^:：]{1,8}\s*[:：]/.test(pass)) pass = '';
+    db.prepare('INSERT INTO song_notes(song_id,title,artist,passage,thought,reply,ts) VALUES(?,?,?,?,?,?,?)').run(sid, np.title||'', np.artist||'', pass, th2.slice(0,500), a2.slice(0,1000), now);
     db.prepare('INSERT INTO songs(id,title,artist,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').run(sid, np.title||'', np.artist||'', now, now);
     db.prepare('UPDATE songs SET notes_count=notes_count+1 WHERE id=?').run(sid);
     if (s && s.ai && s.ai.api_key) maybeImpress(s, sid, np.title||'', np.artist||'');
   } catch(e){}
 }
-// 房间预热（宫殿语义：进了听歌房间/房间里切歌，才对这首歌做分析——不是每次播放都烧）
-app.post('/api/analysis-warm',(q,r)=>{ try{ const b=q.body||{}; const s0=getSettings(); const s={...s0, ai:mergeAi(s0.ai, b.ai||{})}; if(!s.ai.api_key) return r.json({ok:false}); const np={ id:String(b.id||''), title:String(b.title||''), artist:String(b.artist||''), url:String(b.url||'') }; if(np.id && /^\d+$/.test(np.id) && !readAnalysis(np.id)) ensureAnalysis(s, np); r.json({ok:true}); }catch(e){ r.status(500).json({ok:false,error:e.message}); } });
+app.get('/api/song-analysis',(q,r)=>{ try{ const sid=String(q.query.id||''); const a=sid?readAnalysis(sid):null; r.json({ok:true, text:(a&&a.text)||''}); }catch(e){ r.status(500).json({ok:false,error:e.message}); } });
 app.get('/api/song-notes',(q,r)=>{ try{ const sid=String(q.query.id||''); const limit=Math.min(200, Number(q.query.limit)||60); const rows = sid ? db.prepare('SELECT song_id,title,artist,passage,thought,reply,ts FROM song_notes WHERE song_id=? ORDER BY ts DESC, rowid DESC LIMIT ?').all(sid, limit) : db.prepare('SELECT song_id,title,artist,passage,thought,reply,ts FROM song_notes ORDER BY ts DESC, rowid DESC LIMIT ?').all(limit); r.json({ok:true, notes:rows}); }catch(e){ r.status(500).json({ok:false,error:e.message}); } });
 app.post('/api/song-note',(q,r)=>{ try{ const b=q.body||{}; const sid=String(b.id||''); if(!sid) return r.json({ok:false}); const s0=getSettings(); const s2={...s0, ai:mergeAi(s0.ai, b.ai)}; db.prepare('INSERT INTO song_notes(song_id,title,artist,passage,thought,reply,ts) VALUES(?,?,?,?,?,?,?)').run(sid, String(b.title||''), String(b.artist||''), String(b.passage||''), String(b.thought||''), String(b.reply||''), Date.now()); try{ db.prepare('INSERT INTO songs(id,title,artist,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING').run(sid, String(b.title||''), String(b.artist||''), Date.now(), Date.now()); db.prepare('UPDATE songs SET notes_count=notes_count+1 WHERE id=?').run(sid); }catch(e){} if(s2.ai.api_key) maybeImpress(s2, sid, b.title, b.artist); r.json({ok:true}); }catch(e){ r.status(500).json({ok:false,error:e.message}); } });
 function fmtSec(x){ x=Math.max(0,Math.floor(Number(x)||0)); return Math.floor(x/60)+':'+String(x%60).padStart(2,'0'); }
 // 组装"正在播"的完整上下文：进度 / 播放次数 / 歌曲分析 / 印象（或在场记录）
-function enrichNp(s, np){
+async function enrichNp(s, np){
   if(!np || !np.id || !/^\d+$/.test(String(np.id))) return np;
   const sid = String(np.id);
   try { np.plays = countPlays(sid); } catch(e){}
   const a = readAnalysis(sid);
-  if (a) np.analysis = a.text; else ensureAnalysis(s, np);
+  if (a) np.analysis = a.text;
+  else {
+    const r = ensureAnalysis(s, np);
+    const t = (r && typeof r.then === 'function') ? await Promise.race([r, new Promise(res => setTimeout(() => res(null), 110000))]) : r;
+    if (t) np.analysis = t;
+  }
   const im = readImpression(sid);
   if (im) np.impression = im.text;
   else { const ns = readNotes(sid, IMPRESSION_EVERY); if (ns.length) np.notes = ns; }
@@ -134,9 +142,8 @@ function ensureAnalysis(s, np){
     const sid = String(np.id);
     const hit = readAnalysis(sid);
     if (hit) return hit.text;
-    if (_anBusy[sid]) return null;
-    _anBusy[sid] = 1;
-    (async () => {
+    if (_anBusy[sid]) return _anBusy[sid];
+    const _pr = (async () => {
       try {
         let lrc = '';
         try { const sr = db.prepare('SELECT lyrics FROM songs WHERE id=?').get(sid); lrc = (sr && sr.lyrics) || ''; } catch(e){}
@@ -160,12 +167,13 @@ function ensureAnalysis(s, np){
           }
         } catch(e){ console.log('[analysis audio dl fail]', sid, e.message); }
         const head = (np.title || '这首歌') + (np.artist ? (' - ' + np.artist) : '');
-        let text = '';
+        let text = ''; let usedAudio = false;
         if (audioB64) {
           const prompt = '你会收到一首歌的完整音频。请真的去听这首歌（不要凭歌名或常识编造），然后用中文做一份分时间段的赏析。开头第一行写「' + head + '」。\n按时间顺序自然分段，尽量带上大致时间点（如 0:00、0:45、1:30）：曲式结构（前奏/主歌/副歌/桥段/尾奏分别在哪个时间段）；情绪走向随时间如何起伏；人声状态（真假声切换、气声、爆发力等细节）；编曲变化（乐器层次、动态的增减）；最戳人的几句歌词。总字数控制在 450 字以内（这段会被注入对话上下文）。' + (lrc ? ('\n\n[完整歌词，行首[分:秒]是时间轴，引用歌词以这里为准]\n' + String(lrc).slice(0, 6000)) : '');
           try {
-            text = await callLLM(s2, [{ role: 'user', content: [ { type: 'text', text: prompt }, { type: 'input_audio', input_audio: { data: audioB64, format: 'mp3' } } ] }], { timeout: 120000 });
+            text = await callLLM(s2, [{ role: 'user', content: [ { type: 'text', text: prompt }, { type: 'input_audio', input_audio: { data: audioB64, format: 'mp3' } } ] }], { timeout: 100000 });
           } catch(e){ console.log('[analysis audio llm fail]', sid, e.message.slice(0, 200)); }
+          if (text) usedAudio = true;
         }
         if (!text) {
           text = await callLLM(s2, [
@@ -174,10 +182,12 @@ function ensureAnalysis(s, np){
           ]);
         }
         if (text) appendAnalysis({ id: sid, title: np.title || '', artist: np.artist || '', text, ts: Date.now() });
-        console.log('[analysis]', sid, 'by', s2.ai.model, audioB64 ? '(audio)' : '(text)', text ? 'ok' : 'empty');
-      } catch(e){ console.log('[analysis err]', sid, e.message); } finally { delete _anBusy[sid]; }
+        console.log('[analysis]', sid, 'by', s2.ai.model, usedAudio ? '(audio)' : '(text)', text ? 'ok' : 'empty');
+        return text || null;
+      } catch(e){ console.log('[analysis err]', sid, e.message); return null; } finally { delete _anBusy[sid]; }
     })();
-    return null;
+    _anBusy[sid] = _pr;
+    return _pr;
   } catch(e) { return null; }
 }
 // 宫殿 parse_replies 的 JS 版：模型按协议输出 JSON 数组 -> 拆成多条气泡；容错：数组前粘杂字就从第一个 [ 切进去；再不行按换行拆；最后整段一条
@@ -197,7 +207,7 @@ function parseReplies(text){
 function withAnalysisAi(s){ const a=s.ai||{}; if(!(a.a_model||a.a_key||a.a_base)) return s; return { ...s, ai:{ ...a, base_url:a.a_base||a.base_url, api_key:a.a_key||a.api_key, model:a.a_model||a.model } }; }
 async function fetchT(url,opts,ms){ const ac=new AbortController(); const t=setTimeout(function(){ ac.abort(); },ms||30000); try{ return await fetch(url,{...opts,signal:ac.signal}); } finally { clearTimeout(t); } }
 async function callLLM(s,messages,over){ const base=String(s.ai.base_url||'').replace(/\/+$/,''); if(!s.ai.api_key)throw Object.assign(new Error('AI not configured'),{status:503}); const rr=await fetchT(base+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.ai.api_key},body:JSON.stringify({model:(over&&over.model)||s.ai.model,temperature:0.9,max_tokens:1024,messages})},(over&&over.timeout)||45000); if(!rr.ok){const t=await rr.text().catch(()=>'');throw Object.assign(new Error('LLM '+rr.status+': '+t.slice(0,200)),{status:502});} const d=await rr.json(); return (d.choices&&d.choices[0]&&d.choices[0].message&&d.choices[0].message.content||'').trim(); }
-app.post('/api/chat',async(q,r)=>{ try{ const s0=getSettings(); const bb=q.body||{}; const s={...s0, ai:mergeAi(s0.ai,bb.ai)}; if(!s.ai.api_key)return r.status(503).json({ok:false,error:'AI not set up: open the Model tab and add your endpoint + key'}); const {kind='music',prompt='',history=[],nowPlaying=null}=q.body||{}; const np=nowPlaying||(bb.ai&&bb.ai.nowPlaying)||null; const past=Array.isArray(history)?history.slice(-12).filter(m=>m&&m.role&&typeof m.content==='string'):[]; if(np){ enrichNp(s,np); } const raw=await callLLM(s,[{role:'system',content:sysPrompt(s,kind,np)},...past,{role:'user',content:String(prompt)}]); const reply=parseReplies(raw).join('\n'); if(!(bb.ai&&bb.ai.no_note)) logRoomNote(s, np, prompt, reply); r.json({ok:true,reply}); }catch(e){ r.status(e.status||500).json({ok:false,error:e.message}); } });
+app.post('/api/chat',async(q,r)=>{ try{ const s0=getSettings(); const bb=q.body||{}; const s={...s0, ai:mergeAi(s0.ai,bb.ai)}; if(!s.ai.api_key)return r.status(503).json({ok:false,error:'AI not set up: open the Model tab and add your endpoint + key'}); const {kind='music',prompt='',history=[],nowPlaying=null}=q.body||{}; const np=nowPlaying||(bb.ai&&bb.ai.nowPlaying)||null; const past=Array.isArray(history)?history.slice(-12).filter(m=>m&&m.role&&typeof m.content==='string'):[]; if(np){ if(bb.ai&&bb.ai.quote) np.quote=String(bb.ai.quote).slice(0,120); await enrichNp(s,np); } const raw=await callLLM(s,[{role:'system',content:sysPrompt(s,kind,np)},...past,{role:'user',content:String(prompt)}]); const reply=parseReplies(raw).join('\n'); if(!(bb.ai&&bb.ai.no_note)) logRoomNote(s, np, prompt, reply); r.json({ok:true,reply}); }catch(e){ r.status(e.status||500).json({ok:false,error:e.message}); } });
 // —— Song analysis: cached per song id so each song is analyzed once ——
 function readAnalysis(sid){ try { return db.prepare("SELECT id,title,artist,text,ts FROM song_analysis WHERE id=? AND text!=''").get(String(sid)) || null; } catch(e){ return null; } }
 function appendAnalysis(e){ try { db.prepare('INSERT OR REPLACE INTO song_analysis(id,title,artist,text,ts) VALUES(?,?,?,?,?)').run(String(e.id||''), e.title||'', e.artist||'', e.text||'', e.ts||Date.now()); } catch(err){} }
@@ -290,7 +300,7 @@ wss.on('connection', (sock, req) => {
         const np = m.nowPlaying || (m.ai && m.ai.nowPlaying) || null;
         const hist = m.history || (m.ai && m.ai.history) || [];
         const past = Array.isArray(hist) ? hist.slice(-12).filter(x=>x&&x.role&&typeof x.content==='string') : [];
-        if (np) { enrichNp(eff, np); }
+        if (np) { if (m.ai && m.ai.quote) np.quote = String(m.ai.quote).slice(0,120); await enrichNp(eff, np); }
         const reply = parseReplies(await callLLM(eff, [{ role:'system', content: sysPrompt(eff, 'music', np) }, ...past, { role:'user', content: String(m.prompt||'') }])).join('\n');
         if (!(m.ai && m.ai.no_note)) logRoomNote(eff, np, m.prompt, reply);
         sock.send(JSON.stringify({ t:'ai', id:m.id, reply }));
