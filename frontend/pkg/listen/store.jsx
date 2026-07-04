@@ -28,7 +28,7 @@ function lsSeedStore() {
       { id: 'f3', title: '旧照片',     artist: 'Ren',     cover: 'ls-cover-3', disliked: false },
       { id: 'f4', title: '夜色温柔', artist: 'Aria',    cover: 'ls-cover-1', disliked: false },
     ],
-    model: { chat: { name: '', endpoint: '', key: '' }, analysis: { name: 'google/gemini-2.5-flash', endpoint: '', key: '' } },
+    model: { chat: { name: '', endpoint: '', key: '' }, analysis: { name: '', endpoint: '', key: '' } },
   };
 }
 
@@ -40,7 +40,8 @@ function lsLoadStore() {
   s.archive = s.archive || []; s.library = s.library || []; s.fm = s.fm || [];
   s.model = s.model || {};
   if (!s.model.chat) s.model.chat = (s.model.name !== undefined && s.model.name !== null && s.model.chat === undefined && !s.model.analysis) ? { name: s.model.name || '', endpoint: s.model.endpoint || '', key: s.model.key || '' } : (s.model.chat || { name: '', endpoint: '', key: '' });
-  if (!s.model.analysis) s.model.analysis = { name: 'google/gemini-2.5-flash', endpoint: '', key: '' };
+  if (!s.model.analysis) s.model.analysis = { name: '', endpoint: '', key: '' };
+  if (s.model.analysis.name === 'google/gemini-2.5-flash' && !s.model.analysis.endpoint) s.model.analysis.name = '';
   window.__lsStore = s;
   return s;
 }
